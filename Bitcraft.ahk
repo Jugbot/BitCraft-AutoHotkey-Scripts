@@ -126,14 +126,16 @@ PostClick(x, y, win := "A") {
     PostMessage(0x202, , lParam, , win) ;WM_LBUTTONUP
 }
 
-DrawRect(x, y, w, h, text := "", resizeX := false, resizeY := false, aspectRatio := unset, minW := 0, minH := 0) {
+DrawRect(x, y, w, h, text := "", resizeX := false, resizeY := false, aspectRatio := unset) {
     ; Draw a draggable rectangle overlay on the screen
     rect := { x: x, y: y, w: w, h: h }, dragging := false, offsetX := 0, offsetY := 0
 
     if !IsSet(rectGui) {
         maxWidth := (resizeX) ? A_ScreenWidth : w
         maxHeight := (resizeY) ? A_ScreenHeight : h
-        rectGui := Gui('+AlwaysOnTop -Caption +LastFound +E0x20 +OwnDialogs +Resize +MinSize' minW 'x' minH ' +MaxSize' maxWidth 'x' maxHeight
+        minWidth := (resizeX) ? 0 : w
+        minHeight := (resizeY) ? 0 : h
+        rectGui := Gui('+AlwaysOnTop -Caption +LastFound +E0x20 +OwnDialogs +Resize +MinSize' minWidth 'x' minHeight ' +MaxSize' maxWidth 'x' maxHeight
         )
         rectGui.BackColor := 'ea00ff'
         rectGui.SetFont('s12', 'Segoe UI')
@@ -183,7 +185,8 @@ Rectangle(x, y, w, h) {
 }
 
 GetHWNDRect(hwnd) {
-    WinGetPos(&x, &y, &w, &h, "ahk_id " hwnd)
+    WinGetPos(&x, &y, ,, "ahk_id " hwnd)
+    WinGetClientPos(,, &w, &h, "ahk_id " hwnd)
     return Rectangle(x, y, w, h)
 }
 
@@ -222,10 +225,10 @@ staminaRegenTime := 30000
 
 configFile := "config.ini"
 configSection := {
-    stamina : "Stamina",
-    item : "Item",
-    action : "Action",
-    workbench : "Workbench",
+    stamina: "Stamina",
+    item: "Item",
+    action: "Action",
+    workbench: "Workbench",
     complete: "Complete"
 }
 CoordMode 'Pixel', 'Screen'
@@ -265,9 +268,7 @@ DrawSavedRect(name) {
         return DrawRect
     }
     Substitute(_x, _y, w, h, args*) {
-        return DrawRect(rect.x, rect.y, rect.w, rect.h, 
-            minW := w, minH := h,
-            args*)
+        return DrawRect(rect.x, rect.y, rect.w, rect.h, args*)
     }
     return Substitute
 }
@@ -277,7 +278,8 @@ CreateWindows() {
     itemWindow := DrawSavedRect(configSection.item)(mainX + itemX, mainY + itemY, 200, 50, "Item")
     actionWindow := DrawSavedRect(configSection.action)(mainX + actionX, mainY + actionY, 200, 50, "Action")
     completeWindow := DrawSavedRect(configSection.complete)(mainX + claimX, mainY + claimY, 200, 50, "Claim", true)
-    workbenchWindow := DrawSavedRect(configSection.workbench)(mainX + mainW / 2, mainY + mainH / 2, 100, 100, "Workbench")
+    workbenchWindow := DrawSavedRect(configSection.workbench)(mainX + mainW / 2, mainY + mainH / 2, 100, 100,
+        "Workbench")
     button := workbenchWindow.AddButton("Default", "Start")
 
     SubmitCallback(*) {
@@ -303,15 +305,6 @@ CreateWindows() {
         actionWindow := unset
         workbenchWindow := unset
         completeWindow := unset
-
-        ; WorkbenchTask({
-        ;     staminaStartPos: staminaStartPos,
-        ;     staminaEndPos: staminaEndPos,
-        ;     itemPos: itemRect.center,
-        ;     actionPos: actionRect.center,
-        ;     workbenchPos: workbenchRect.center,
-        ;     completeRect: completeRect
-        ; })
     }
 
     button.OnEvent("Click", SubmitCallback)
@@ -333,33 +326,37 @@ WorkbenchTask() {
         completeRect: LoadRectStrict(configSection.complete)
     }
 
-    while true {
-        Sleep(100)  ; Check every 100 ms
+    MainLoop() {
 
-        text := OCR.FromRect(
-            positions.completeRect.x + positions.completeRect.w / 2, 
-            positions.completeRect.y, 
-            positions.completeRect.w /2, 
+        ocrResult := OCR.FromRect(
+            positions.completeRect.x + positions.completeRect.w / 2,
+            positions.completeRect.y,
+            positions.completeRect.w / 2,
             positions.completeRect.h,
         )
-        if InStr(text.Text, "claim") {
-            OutputDebug("Found 'claim' in OCR text: `"" text "`"")
+        if InStr(ocrResult.Text, "claim") {
+            OutputDebug("Found 'claim' in OCR text: `"" ocrResult.text "`"")
             Sleep(500)
             Click(positions.completeRect.x + positions.completeRect.w - 15, positions.completeRect.center.y)
-            break
+            OutputDebug("Resource available, collecting and exiting...")
+            SoundPlay("*48")
+            SetTimer(MainLoop, 0)
+            return
         }
-        OutputDebug("OCR text: " text.Text)
 
         currentColor := PixelGetColor(positions.staminaStartPos.x, positions.staminaStartPos.y)
         if (staminaColor != currentColor) {
             OutputDebug("Stamina not full at (" positions.staminaStartPos.x ", " positions.staminaStartPos.y "), color: " currentColor "`n"
             )
-            ToolTip("Stamina not full, performing actions...")
+            OutputDebug("Stamina not full, performing actions...")
             Sleep(1000)
 
             ; Stop task
-            Click(positions.workbenchPos.x, positions.workbenchPos.y)
-            Sleep(1000)
+            ; NOTE: Just clicking doesn't work sometimes, use interact hotkey instead
+            MouseMove(positions.workbenchPos.x, positions.workbenchPos.y)
+            Sleep(200)
+            Send("n")
+            Sleep(2000)
             Click(positions.itemPos.x, positions.itemPos.y)
             Sleep(500)
             Click(positions.actionPos.x, positions.actionPos.y)
@@ -369,58 +366,17 @@ WorkbenchTask() {
             OutputDebug("Waiting for stamina to regenerate...")
             success := WaitForColorChange(staminaColor, positions.staminaEndPos.x, positions.staminaEndPos.y, 60000)
             if (!success) {
-                ToolTip("[warn] Stamina did not regenerate in time")
+                OutputDebug("[warn] Stamina did not regenerate in time")
                 SoundPlay("*48")
             }
 
             ; Resume task
             Click(positions.actionPos.x, positions.actionPos.y)
         }
-
-        ; statusColor1 := PixelGetColor(status1X, statusY)
-        ; statusColor2 := PixelGetColor(status2X, statusY)
-        ; statusColor3 := PixelGetColor(status3X, statusY)
-        ; statusCount := (statusColor1 == statusColor) + (statusColor2 == statusColor) + (statusColor3 == statusColor)
-        ; If (statusCount < 2 && statusCount > 0) {
-        ;     OutputDebug("Missing statuses, found " statusColor1 ", " statusColor2 ", " statusColor3 "`n")
-        ;     Send("+e")
-        ;     SoundBeep()
-        ; }
     }
-    ToolTip("Resource available, collecting and exiting...")
-    SoundPlay("*48")
+
+    SetTimer(MainLoop, 100)
 }
-
-CollectionTask() {
-    ; Record position of mouse cursor
-    MouseGetPos(&mouseX, &mouseY)
-    while true {
-        Sleep(100)  ; Check every 100 ms
-        staminaFullColor := PixelGetColor(staminaFullX, staminaFullY)
-        if (staminaFullColor == staminaColor) {
-            Click(mouseX, mouseY)
-            Sleep(10000)
-        }
-    }
-}
-
-F1::CreateWindows()
-
-F2::WorkbenchTask()
-
-; F3::{
-;     If not A_IsAdmin ;force the script to run as admin
-;     {
-;         Run '*RunAs "' A_ScriptFullPath '"'
-;         ExitApp
-;     }
-
-;     MouseGetPos(&mouseX, &mouseY)
-;     ToolTip("Clicking in background window...")
-;     Sleep(1000)
-;     ; ClickInBackground("BitCraft", 49,1337)
-;     PostClick(49,1337, "BitCraft")
-; }
 
 EatFood() {
     userInput := InputBox("Enter food duration in minutes:", "Food Duration Input", , "15").Value
@@ -432,28 +388,28 @@ EatFood() {
     if (userInput < 15) {
         return MsgBox("Enter a number at or above 15 minutes.")
     }
-    while true {
-        Sleep(1000 * 60 * userInput)
+    EatFood() {
         OutputDebug("Eating food for " userInput " minutes")
+        WinActivate("ahk_id " bitcraftHWND)
+        Sleep(200)
+        ; ControlSend("+e", , "ahk_id " bitcraftHWND)
         Send("+e")
     }
+    SetTimer(EatFood, 1000 * 60 * userInput)
 }
 
-F3::EatFood()
+F1:: CreateWindows()
+
+F2:: WorkbenchTask()
+
+F3:: EatFood()
 
 F4:: {
-    OutputDebug("Exiting")
+    OutputDebug("Exiting Thread")
     Exit(1)
 }
 
 F5:: {
-    rect1 := DrawRect(100, 100, 200, 100)
-    rect2 := DrawRect(300, 300, 200, 100)
-
-    while true {
-        Sleep(1000)
-        rect1Pos := GetHWNDRect(rect1.Hwnd)
-        rect2Pos := GetHWNDRect(rect2.Hwnd)
-        ToolTip("Rect1: " rect1Pos.x ", " rect1Pos.y "`nRect2: " rect2Pos.x ", " rect2Pos.y)
-    }
+    OutputDebug("Exiting")
+    ExitApp()
 }

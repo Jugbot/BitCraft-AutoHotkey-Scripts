@@ -128,8 +128,8 @@ Rectangle(x, y, w, h) {
 }
 
 GetHWNDRect(hwnd) {
-    WinGetPos(&x, &y, ,, "ahk_id " hwnd)
-    WinGetClientPos(,, &w, &h, "ahk_id " hwnd)
+    WinGetPos(&x, &y, , , "ahk_id " hwnd)
+    WinGetClientPos(, , &w, &h, "ahk_id " hwnd)
     return Rectangle(x, y, w, h)
 }
 

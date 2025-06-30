@@ -1,6 +1,6 @@
 ﻿#Requires AutoHotkey v2.0
 
-#include "./OCR-2.0-alpha.4/Lib/OCR.ahk"
+#include "./OCR/Lib/OCR.ahk"
 
 bitcraftHWND := WinExist("BitCraft")
 if 0 == bitcraftHWND {

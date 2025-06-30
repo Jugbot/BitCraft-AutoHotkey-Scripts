@@ -126,14 +126,14 @@ PostClick(x, y, win := "A") {
     PostMessage(0x202, , lParam, , win) ;WM_LBUTTONUP
 }
 
-DrawRect(x, y, w, h, text := "", resizeX := false, resizeY := false, aspectRatio := unset) {
+DrawRect(x, y, w, h, text := "", resizeX := false, resizeY := false, aspectRatio := unset, minW := 0, minH := 0) {
     ; Draw a draggable rectangle overlay on the screen
     rect := { x: x, y: y, w: w, h: h }, dragging := false, offsetX := 0, offsetY := 0
 
     if !IsSet(rectGui) {
         maxWidth := (resizeX) ? A_ScreenWidth : w
         maxHeight := (resizeY) ? A_ScreenHeight : h
-        rectGui := Gui('+AlwaysOnTop -Caption +LastFound +E0x20 +OwnDialogs +Resize +MinSize' w 'x' h ' +MaxSize' maxWidth 'x' maxHeight
+        rectGui := Gui('+AlwaysOnTop -Caption +LastFound +E0x20 +OwnDialogs +Resize +MinSize' minW 'x' minH ' +MaxSize' maxWidth 'x' maxHeight
         )
         rectGui.BackColor := 'ea00ff'
         rectGui.SetFont('s12', 'Segoe UI')
@@ -178,18 +178,13 @@ DrawRect(x, y, w, h, text := "", resizeX := false, resizeY := false, aspectRatio
     return rectGui
 }
 
+Rectangle(x, y, w, h) {
+    return { x: x, y: y, w: w, h: h, center: { x: x + w // 2, y: y + h // 2 } }
+}
+
 GetHWNDRect(hwnd) {
     WinGetPos(&x, &y, &w, &h, "ahk_id " hwnd)
-    return {
-        x: x,
-        y: y,
-        w: w,
-        h: h,
-        center: {
-            x: x + w // 2,
-            y: y + h // 2
-        }
-    }
+    return Rectangle(x, y, w, h)
 }
 
 craftW := 1415
@@ -224,30 +219,78 @@ itemY := 505
 actionX := itemX
 actionY := 990
 staminaRegenTime := 30000
-configFile := "config.ini"
 
+configFile := "config.ini"
+configSection := {
+    stamina : "Stamina",
+    item : "Item",
+    action : "Action",
+    workbench : "Workbench",
+    complete: "Complete"
+}
 CoordMode 'Pixel', 'Screen'
 CoordMode 'Mouse', 'Screen'
 
+SaveRect(rect, name) {
+    IniWrite(rect.x, configFile, name, "x")
+    IniWrite(rect.y, configFile, name, "y")
+    IniWrite(rect.w, configFile, name, "w")
+    IniWrite(rect.h, configFile, name, "h")
+}
+
+LoadRect(name) {
+    x := IniRead(configFile, name, "x", "")
+    y := IniRead(configFile, name, "y", "")
+    w := IniRead(configFile, name, "w", "")
+    h := IniRead(configFile, name, "h", "")
+    if (x = "" || y = "" || w = "" || h = "") {
+        OutputDebug("Failed to load rectangle: " name)
+        return false
+    }
+    return Rectangle(Number(x), Number(y), Number(w), Number(h))
+}
+
+LoadRectStrict(name) {
+    rect := LoadRect(name)
+    if (!IsSet(rect)) {
+        throw Error("Failed to load: " name)
+    }
+    return rect
+}
+
+DrawSavedRect(name) {
+    rect := LoadRect(name)
+    if (!rect) {
+        OutputDebug("No saved rectangle found for: " name)
+        return DrawRect
+    }
+    Substitute(_x, _y, w, h, args*) {
+        return DrawRect(rect.x, rect.y, rect.w, rect.h, 
+            minW := w, minH := h,
+            args*)
+    }
+    return Substitute
+}
+
 CreateWindows() {
-    staminaWindow := DrawRect(mainX + staminaX, mainY + staminaY, 70, 20, "Stamina", true)
-    itemWindow := DrawRect(mainX + itemX, mainY + itemY, 200, 50, "Item")
-    actionWindow := DrawRect(mainX + actionX, mainY + actionY, 200, 50, "Action")
-    completeWindow := DrawRect(mainX + claimX, mainY + claimY, 200, 50, "Claim", true)
-    workbenchWindow := DrawRect(mainX + mainW / 2, mainY + mainH / 2, 100, 100, "Workbench")
+    staminaWindow := DrawSavedRect(configSection.stamina)(mainX + staminaX, mainY + staminaY, 70, 20, "Stamina", true)
+    itemWindow := DrawSavedRect(configSection.item)(mainX + itemX, mainY + itemY, 200, 50, "Item")
+    actionWindow := DrawSavedRect(configSection.action)(mainX + actionX, mainY + actionY, 200, 50, "Action")
+    completeWindow := DrawSavedRect(configSection.complete)(mainX + claimX, mainY + claimY, 200, 50, "Claim", true)
+    workbenchWindow := DrawSavedRect(configSection.workbench)(mainX + mainW / 2, mainY + mainH / 2, 100, 100, "Workbench")
     button := workbenchWindow.AddButton("Default", "Start")
 
     SubmitCallback(*) {
         staminaRect := GetHWNDRect(staminaWindow.Hwnd)
-        IniWrite(staminaRect.x, configFile, "StaminaPosition", "x")
-        IniWrite(staminaRect.y, configFile, "StaminaPosition", "y")
-        IniWrite(staminaRect.w, configFile, "StaminaPosition", "w")
-        staminaStartPos := { x: staminaRect.x, y: staminaRect.center.y }
-        staminaEndPos := { x: staminaRect.x + staminaRect.w, y: staminaRect.center.y }
+        SaveRect(staminaRect, configSection.stamina)
         itemRect := GetHWNDRect(itemWindow.Hwnd)
+        SaveRect(itemRect, configSection.item)
         actionRect := GetHWNDRect(actionWindow.Hwnd)
+        SaveRect(actionRect, configSection.action)
         workbenchRect := GetHWNDRect(workbenchWindow.Hwnd)
+        SaveRect(workbenchRect, configSection.workbench)
         completeRect := GetHWNDRect(completeWindow.Hwnd)
+        SaveRect(completeRect, configSection.complete)
 
         ; Close all GUIs created by DrawRect
         try staminaWindow.Destroy()
@@ -274,8 +317,21 @@ CreateWindows() {
     button.OnEvent("Click", SubmitCallback)
 }
 
-WorkbenchTask(positions) {
-    ToolTip("Starting Workbench Task...")
+WorkbenchTask() {
+    OutputDebug("Starting Workbench Task...")
+
+    staminaRect := LoadRectStrict(configSection.stamina)
+    staminaStartPos := { x: staminaRect.x, y: staminaRect.center.y }
+    staminaEndPos := { x: staminaRect.x + staminaRect.w, y: staminaRect.center.y }
+
+    positions := {
+        staminaStartPos: staminaStartPos,
+        staminaEndPos: staminaEndPos,
+        itemPos: LoadRectStrict(configSection.item).center,
+        actionPos: LoadRectStrict(configSection.action).center,
+        workbenchPos: LoadRectStrict(configSection.workbench).center,
+        completeRect: LoadRectStrict(configSection.complete)
+    }
 
     while true {
         Sleep(100)  ; Check every 100 ms
@@ -348,7 +404,9 @@ CollectionTask() {
     }
 }
 
-F2:: CreateWindows()
+F1::CreateWindows()
+
+F2::WorkbenchTask()
 
 ; F3::{
 ;     If not A_IsAdmin ;force the script to run as admin

@@ -1,4 +1,6 @@
-## Controls
+> [!WARNING]
+> This script may be interpreted as a bannable offense according to the [community guidelines](https://bitcraftonline.com/community-guidelines).
+> Use at your own risk.
 
 ### [F1] - Align UI Boxes
 Align the boxes to the corresponding UI elements. Alignments are saved to a config.
